@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Simulasi Elektromagnetik & Induksi Faraday</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap');
+        body { margin: 0; overflow: hidden; font-family: 'Inter', sans-serif; background-color: #0f172a; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* Glassmorphism UI */
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            z-index: 10;
+        }
+
+        /* Custom Range Slider */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px; width: 18px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -7px;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+            border: 2px solid #fff;
+            transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:active {
+            transform: scale(1.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #334155;
+            border-radius: 2px;
+        }
+        
+        .mode-btn {
+            background: transparent;
+            color: #94a3b8;
+            border: 1px solid #334155;
+            transition: all 0.3s ease;
+        }
+        .mode-btn.active {
+            background-color: #3b82f6;
+            color: white;
+            border-color: #3b82f6;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.4);
+        }
+        
+        #instruction-overlay {
+            position: absolute;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #e2e8f0;
+            background: rgba(0,0,0,0.6);
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 14px;
+            font-weight: 500;
+            pointer-events: none;
+            text-align: center;
+            z-index: 10;
+            backdrop-filter: blur(4px);
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+
+        /* Toggle Switch */
+        .toggle-checkbox:checked {
+            right: 0;
+            border-color: #68D391;
+        }
+        .toggle-checkbox:checked + .toggle-label {
+            background-color: #68D391;
+        }
+    </style>
+    <!-- Load Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+    
+    <div id="instruction-overlay">Putar kamera dengan mouse/sentuhan. Lihat arah garis gaya magnet (U ➔ S).</div>
+
+    <!-- UI Panel (Sudut Kiri Bawah/Kanan Bawah tergantung layar) -->
+    <div class="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-8 sm:w-80 glass-panel rounded-2xl p-5 text-gray-200">
+        <h2 class="text-lg font-bold text-white mb-4 border-b border-gray-600 pb-2 flex items-center justify-between">
+            <span>Laboratorium Virtual</span>
+        </h2>
+        
+        <!-- Mode Selection -->
+        <div class="mb-5">
+            <label class="block text-xs uppercase tracking-wider text-gray-400 mb-2 font-semibold">Mode Eksperimen</label>
+            <div class="flex gap-2">
+                <button id="btn-mode-field" class="mode-btn active flex-1 py-2 px-2 rounded-lg text-sm font-medium hover:bg-gray-700">Medan Magnet</button>
+                <button id="btn-mode-faraday" class="mode-btn flex-1 py-2 px-2 rounded-lg text-sm font-medium hover:bg-gray-700">Induksi Faraday</button>
+            </div>
+        </div>
+
+        <!-- Magnet Shape -->
+        <div id="shape-control" class="mb-5">
+            <label class="block text-xs uppercase tracking-wider text-gray-400 mb-2 font-semibold">Bentuk Magnet</label>
+            <select id="magnet-shape" class="w-full bg-slate-800 border border-slate-600 text-white text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-2.5 outline-none cursor-pointer">
+                <option value="bar">Magnet Batang</option>
+                <option value="horseshoe">Magnet Tapal Kuda</option>
+                <option value="ring">Magnet Cincin</option>
+                <option value="needle">Magnet Jarum</option>
+            </select>
+        </div>
+
+        <!-- Magnet Strength -->
+        <div class="mb-2">
+            <div class="flex justify-between mb-2">
+                <label class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Kekuatan Magnet</label>
+                <span id="strength-val" class="text-xs text-blue-400 font-bold">50%</span>
+            </div>
+            <input type="range" id="magnet-strength" min="10" max="100" value="50">
+        </div>
+        
+        <!-- Faraday Specific Controls -->
+        <div id="faraday-controls" class="hidden mt-5 pt-4 border-t border-gray-600">
+            <div class="flex justify-between items-center mb-3">
+                <label class="text-xs uppercase tracking-wider text-gray-400 font-semibold">Posisi Magnet</label>
+                
+                <!-- Auto Toggle -->
+                <div class="flex items-center">
+                    <span class="mr-2 text-xs text-gray-300">Gerak Otomatis</span>
+                    <div class="relative inline-block w-10 mr-2 align-middle select-none transition duration-200 ease-in">
+                        <input type="checkbox" name="toggle" id="auto-move-toggle" class="toggle-checkbox absolute block w-5 h-5 rounded-full bg-white border-4 border-slate-600 appearance-none cursor-pointer z-10 transition-all duration-300" style="top: 1px; left: 1px;"/>
+                        <label for="auto-move-toggle" class="toggle-label block overflow-hidden h-6 rounded-full bg-slate-600 cursor-pointer transition-colors duration-300"></label>
+                    </div>
+                </div>
+            </div>
+
+            <input type="range" id="magnet-position" min="-50" max="50" value="-30" class="w-full">
+            <div class="flex justify-between text-[10px] text-gray-500 mt-2 font-medium">
+                <span>Luar</span>
+                <span>Dalam Kumparan</span>
+                <span>Luar</span>
+            </div>
+            <p class="text-[11px] text-yellow-200/70 mt-3 italic text-center">Garis gaya magnet bergerak memotong kumparan menghasilkan listrik.</p>
+        </div>
+    </div>
+
+    <script>
+        let scene, camera, renderer, controls;
+        let masterMagnetGroup, magnetMeshGroup, fieldLinesGroup, faradayGroup;
+        let currentMagnetType = 'bar';
+        let magnetStrength = 0.5; // 0.1 to 1.0
+        let isFaradayMode = false;
+        let isAutoMove = false;
+        
+        // Material realistis
+        const redMat = new THREE.MeshStandardMaterial({ color: 0xe62020, metalness: 0.3, roughness: 0.4 }); // Utara
+        const blueMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, metalness: 0.3, roughness: 0.4 }); // Selatan
+        const copperMat = new THREE.MeshStandardMaterial({ color: 0xc17c54, metalness: 0.8, roughness: 0.3 }); // Tembaga
+        const ironMat = new THREE.MeshStandardMaterial({ color: 0x9ca3af, metalness: 0.7, roughness: 0.5 });
+        
+        // Array untuk menyimpan partikel panah (arah medan)
+        let fieldParticles = [];
+        let electronParticles = [];
+        
+        // Komponen Faraday
+        let galvanometerNeedle;
+        let lastMagnetX = -15;
+        let inducedEMF = 0;
+        let bulbGlow;
+        let timeOffset = 0;
+
+        function init() {
+            const container = document.getElementById('canvas-container');
+
+            // 1. Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x0f172a); // Slate 900
+            
+            // Grid untuk orientasi spasial
+            const gridHelper = new THREE.GridHelper(60, 60, 0x334155, 0x1e293b);
+            gridHelper.position.y = -6;
+            scene.add(gridHelper);
+
+            // 2. Camera
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 15, 40);
+
+            // 3. Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            // Soft shadows
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // 4. Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.maxDistance = 80;
+            controls.minDistance = 10;
+            controls.maxPolarAngle = Math.PI / 1.1; // Jangan terlalu ke bawah tanah
+
+            // 5. Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+            dirLight.position.set(20, 30, 20);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+            
+            const fillLight = new THREE.DirectionalLight(0xaabbff, 0.4);
+            fillLight.position.set(-20, 10, -20);
+            scene.add(fillLight);
+
+            // 6. Groups Hierarchy
+            // masterMagnetGroup menampung benda magnet DAN garis gayanya agar bergerak bersama
+            masterMagnetGroup = new THREE.Group();
+            scene.add(masterMagnetGroup);
+            
+            magnetMeshGroup = new THREE.Group();
+            masterMagnetGroup.add(magnetMeshGroup);
+            
+            fieldLinesGroup = new THREE.Group();
+            masterMagnetGroup.add(fieldLinesGroup);
+            
+            faradayGroup = new THREE.Group();
+            scene.add(faradayGroup);
+
+            // 7. Build Scene
+            buildMagnet(currentMagnetType);
+            buildFaradaySetup();
+            updateFieldLines();
+            setMode(false); // Default: Medan Magnet
+
+            // 8. Event Listeners
+            window.addEventListener('resize', onWindowResize);
+            setupUIControls();
+
+            // 9. Start Loop
+            animate();
+        }
+
+        // Fungsi helper untuk membuat material tekstur huruf N & S
+        function createLabelMaterial(text, isNorth) {
+            const canvas = document.createElement('canvas');
+            canvas.width = 128; canvas.height = 128;
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = isNorth ? '#e62020' : '#1e3a8a';
+            ctx.fillRect(0,0,128,128);
+            ctx.font = 'bold 70px Inter, sans-serif';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(text, 64, 64);
+            const tex = new THREE.CanvasTexture(canvas);
+            return new THREE.MeshStandardMaterial({ map: tex, metalness: 0.3, roughness: 0.4 });
+        }
+
+        const matNLabel = createLabelMaterial('N', true);
+        const matSLabel = createLabelMaterial('S', false);
+
+        function buildMagnet(type) {
+            // Bersihkan mesh magnet sebelumnya
+            while(magnetMeshGroup.children.length > 0){ 
+                magnetMeshGroup.remove(magnetMeshGroup.children[0]); 
+            }
+            
+            if (type === 'bar') {
+                // --- Magnet Batang ---
+                const geoN = new THREE.BoxGeometry(4, 1.5, 1.5);
+                const meshN = new THREE.Mesh(geoN, redMat);
+                meshN.position.x = -2;
+                meshN.castShadow = true;
+                
+                const geoS = new THREE.BoxGeometry(4, 1.5, 1.5);
+                const meshS = new THREE.Mesh(geoS, blueMat);
+                meshS.position.x = 2;
+                meshS.castShadow = true;
+
+                // Label N dan S di atas
+                const labelN = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({map: matNLabel.map, transparent:true}));
+                labelN.rotation.x = -Math.PI/2; labelN.position.set(-2, 0.76, 0);
+                
+                const labelS = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({map: matSLabel.map, transparent:true}));
+                labelS.rotation.x = -Math.PI/2; labelS.position.set(2, 0.76, 0);
+
+                magnetMeshGroup.add(meshN, meshS, labelN, labelS);
+
+            } else if (type === 'horseshoe') {
+                // --- Magnet Tapal Kuda Realistis ---
+                // Membuat bentuk 'U' utuh menggunakan ExtrudeGeometry
+                const shape = new THREE.Shape();
+                const outerRadius = 2.5;
+                const innerRadius = 1.0;
+                const legHeight = 3.5;
+
+                // Mulai dari kiri atas bagian dalam
+                shape.moveTo(-innerRadius, legHeight);
+                shape.lineTo(-innerRadius, 0);
+                // Setengah lingkaran dalam
+                shape.absarc(0, 0, innerRadius, Math.PI, 0, true);
+                shape.lineTo(innerRadius, legHeight);
+                // Kaki kanan atas ke luar
+                shape.lineTo(outerRadius, legHeight);
+                shape.lineTo(outerRadius, 0);
+                // Setengah lingkaran luar
+                shape.absarc(0, 0, outerRadius, 0, Math.PI, false);
+                shape.lineTo(-outerRadius, legHeight);
+                shape.lineTo(-innerRadius, legHeight); // Tutup
+
+                const extrudeSettings = { depth: 1.2, bevelEnabled: true, bevelSegments: 3, steps: 1, bevelSize: 0.1, bevelThickness: 0.1 };
+                const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                geo.center(); // Pusatkan geometri
+
+                // Gunakan CanvasTexture untuk membagi warna (Merah kiri, Biru kanan)
+                const canvas = document.createElement('canvas');
+                canvas.width = 256; canvas.height = 2;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#e62020'; ctx.fillRect(0,0,128,2);
+                ctx.fillStyle = '#1e3a8a'; ctx.fillRect(128,0,128,2);
+                const tex = new THREE.CanvasTexture(canvas);
+                
+                // Shader sederhana untuk memetakan tekstur berdasarkan posisi X dunia lokal
+                const uMaterial = new THREE.MeshStandardMaterial({
+                    metalness: 0.4, roughness: 0.5, map: tex
+                });
+                
+                // Hack UV mapping agar kiri merah, kanan biru
+                const pos = geo.attributes.position;
+                const uv = geo.attributes.uv;
+                for(let i=0; i<pos.count; i++) {
+                    const x = pos.getX(i);
+                    // normalize x to 0..1 based on approximate width (-3 to 3)
+                    let u = (x + 3) / 6;
+                    // Clamp to make clear separation
+                    u = u < 0.5 ? 0.25 : 0.75; 
+                    uv.setXY(i, u, 0.5);
+                }
+
+                const horseshoe = new THREE.Mesh(geo, uMaterial);
+                horseshoe.castShadow = true;
+                
+                // Tambahkan Label
+                const labelN = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: matNLabel.map, transparent:true}));
+                labelN.position.set(-1.75, 1.8, 0.61);
+                const labelS = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({map: matSLabel.map, transparent:true}));
+                labelS.position.set(1.75, 1.8, 0.61);
+
+                magnetMeshGroup.add(horseshoe, labelN, labelS);
+
+            } else if (type === 'ring') {
+                // --- Magnet Cincin (Axial: Atas N, Bawah S) ---
+                const geo = new THREE.TorusGeometry(3, 1.2, 32, 64);
+                
+                // Warnai separuh atas merah, separuh bawah biru pakai UV trick
+                const canvas = document.createElement('canvas');
+                canvas.width = 2; canvas.height = 256;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#e62020'; ctx.fillRect(0,0,2,128); // Atas merah
+                ctx.fillStyle = '#1e3a8a'; ctx.fillRect(0,128,2,128); // Bawah biru
+                const tex = new THREE.CanvasTexture(canvas);
+
+                const pos = geo.attributes.position;
+                const uv = geo.attributes.uv;
+                for(let i=0; i<pos.count; i++) {
+                    const z = pos.getZ(i); // Torus standar Z adalah sumbu tebalnya
+                    let v = (z + 1.2) / 2.4;
+                    v = v > 0.5 ? 0.25 : 0.75; 
+                    uv.setXY(i, 0.5, v);
+                }
+
+                const ringMat = new THREE.MeshStandardMaterial({map: tex, metalness: 0.3, roughness: 0.4});
+                const ring = new THREE.Mesh(geo, ringMat);
+                ring.rotation.x = Math.PI / 2; // Rebahkan agar Y menjadi sumbu atas-bawah
+                ring.castShadow = true;
+                
+                const labelN = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 1.2), new THREE.MeshBasicMaterial({map: matNLabel.map, transparent:true}));
+                labelN.rotation.x = -Math.PI/2; labelN.position.set(0, 1.21, 3);
+                
+                magnetMeshGroup.add(ring, labelN);
+
+            } else if (type === 'needle') {
+                // --- Magnet Jarum (Kompas) ---
+                const shape = new THREE.Shape();
+                shape.moveTo(0, 0);
+                shape.lineTo(1.0, 0.5);
+                shape.lineTo(5, 0);
+                shape.lineTo(1.0, -0.5);
+                shape.lineTo(0, 0);
+
+                const extrudeSettings = { depth: 0.3, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: 0.05, bevelThickness: 0.05 };
+                const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                geo.center();
+                
+                const needleN = new THREE.Mesh(geo, redMat);
+                needleN.position.x = -2.5; needleN.castShadow = true;
+                
+                const needleS = new THREE.Mesh(geo, blueMat);
+                needleS.position.x = 2.5; needleS.rotation.y = Math.PI; needleS.castShadow = true;
+
+                // Pin Poros Tengah
+                const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.8, 16), ironMat);
+                pin.rotation.x = Math.PI/2;
+
+                const labelN = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({map: matNLabel.map, transparent:true}));
+                labelN.position.set(-2.5, 0, 0.16);
+                const labelS = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.8), new THREE.MeshBasicMaterial({map: matSLabel.map, transparent:true}));
+                labelS.position.set(2.5, 0, 0.16);
+
+                magnetMeshGroup.add(needleN, needleS, pin, labelN, labelS);
+            }
+        }
+
+        function updateFieldLines() {
+            // Bersihkan garis lama
+            while(fieldLinesGroup.children.length > 0){ 
+                fieldLinesGroup.remove(fieldLinesGroup.children[0]); 
+            }
+            fieldParticles = [];
+
+            const baseLines = Math.floor(25 * magnetStrength);
+            // Material arah panah (putih menyala)
+            const arrowGeo = new THREE.ConeGeometry(0.12, 0.4, 6);
+            arrowGeo.rotateX(Math.PI/2); // Menghadap arah Z kurva
+            const particleMat = new THREE.MeshBasicMaterial({color: 0xffffff, transparent: true, opacity: 0.9});
+
+            // Fungsi helper untuk menggambar jalur dan partikel animasi
+            const createPath = (curve, numParticles = 4) => {
+                const points = curve.getPoints(50);
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
+                // Garis tipis transparan
+                const lineMat = new THREE.LineBasicMaterial({ color: 0x94a3b8, transparent: true, opacity: 0.25 });
+                const line = new THREE.Line(lineGeo, lineMat);
+                fieldLinesGroup.add(line);
+
+                // Tambahkan panah animasi pada jalur
+                for(let i=0; i<numParticles; i++) {
+                    const arrow = new THREE.Mesh(arrowGeo, particleMat);
+                    fieldLinesGroup.add(arrow);
+                    fieldParticles.push({
+                        mesh: arrow,
+                        curve: curve,
+                        progress: i / numParticles,
+                        speed: 0.002 * (0.5 + magnetStrength) // Cepat lambatnya berdasarkan kekuatan
+                    });
+                }
+            };
+
+            // Logika spesifik untuk setiap bentuk magnet
+            if (currentMagnetType === 'bar' || currentMagnetType === 'needle') {
+                // Dipole Field: N (-x) ke S (+x)
+                const poleDist = currentMagnetType === 'bar' ? 3.8 : 4.5;
+                for (let i = 0; i < baseLines; i++) {
+                    const angle = (i / baseLines) * Math.PI * 2;
+                    // Jangkauan (height) garis melengkung
+                    const spread = 2 + Math.random() * 8; 
+                    
+                    // Titik mulai (N) dan akhir (S)
+                    const pStart = new THREE.Vector3(-poleDist, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
+                    const pEnd = new THREE.Vector3(poleDist, (Math.random()-0.5)*0.5, (Math.random()-0.5)*0.5);
+                    
+                    // Titik kontrol Bezier untuk melengkung ke luar lalu masuk
+                    // Menggunakan rotasi radial (angle) untuk menyebar 360 derajat
+                    const cRadius = spread;
+                    const cY = cRadius * Math.sin(angle);
+                    const cZ = cRadius * Math.cos(angle);
+                    
+                    const pControl1 = new THREE.Vector3(-poleDist - 2, cY, cZ);
+                    const pControl2 = new THREE.Vector3(poleDist + 2, cY, cZ);
+                    
+                    const curve = new THREE.CubicBezierCurve3(pStart, pControl1, pControl2, pEnd);
+                    createPath(curve, spread > 5 ? 5 : 3);
+                }
+            } 
+            else if (currentMagnetType === 'horseshoe') {
+                // Tapal Kuda: N (Kiri, x=-1.75) ke S (Kanan, x=1.75). Hadap atas (+y)
+                const numInner = Math.floor(baseLines * 0.4);
+                const numOuter = baseLines - numInner;
+
+                // Garis di celah dalam (Kuat, lurus sedikit melengkung)
+                for (let i = 0; i < numInner; i++) {
+                    const z = (Math.random() - 0.5) * 1.5;
+                    const y = 1.0 + Math.random() * 2.0; // tinggi di antara celah
+                    const pStart = new THREE.Vector3(-1.0, y, z); // Dinding dalam N
+                    const pEnd = new THREE.Vector3(1.0, y, z);   // Dinding dalam S
+                    
+                    const pC1 = new THREE.Vector3(-0.5, y + 0.5, z);
+                    const pC2 = new THREE.Vector3(0.5, y + 0.5, z);
+                    
+                    const curve = new THREE.CubicBezierCurve3(pStart, pC1, pC2, pEnd);
+                    createPath(curve, 2);
+                }
+
+                // Garis luar (Lengkung lebar dari ujung N ke ujung S)
+                for (let i = 0; i < numOuter; i++) {
+                    const angle = Math.random() * Math.PI; // Menyebar ke depan/belakang/samping
+                    const radius = 2 + Math.random() * 6;
+                    
+                    const pStart = new THREE.Vector3(-1.75, 2.5, 0); // Atas N
+                    const pEnd = new THREE.Vector3(1.75, 2.5, 0);   // Atas S
+                    
+                    // Kontrol point melengkung ke luar dan ke atas
+                    const cY = 2.5 + radius;
+                    const cZ = (radius - 2) * Math.sin(angle) * (Math.random() > 0.5 ? 1 : -1);
+                    const cX_spread = radius * Math.cos(angle);
+
+                    const pC1 = new THREE.Vector3(-1.75 - Math.abs(cX_spread), cY, cZ);
+                    const pC2 = new THREE.Vector3(1.75 + Math.abs(cX_spread), cY, cZ);
+
+                    const curve = new THREE.CubicBezierCurve3(pStart, pC1, pC2, pEnd);
+                    createPath(curve, 4);
+                }
+            }
+            else if (currentMagnetType === 'ring') {
+                // Cincin: N (Atas, +y) ke S (Bawah, -y)
+                // Sebagian lewat lubang dalam, sebagian lewat luar
+                const numInner = Math.floor(baseLines * 0.3);
+                const numOuter = baseLines - numInner;
+
+                // Garis lewat lubang dalam
+                for(let i=0; i<numInner; i++) {
+                    const angle = (i/numInner) * Math.PI * 2;
+                    // Jari-jari dalam torus ~1.8
+                    const rStart = 2.0; 
+                    const rMid = 0; // Masuk ke pusat lubang (0,0)
+
+                    const pStart = new THREE.Vector3(rStart * Math.cos(angle), 1.2, rStart * Math.sin(angle));
+                    const pEnd = new THREE.Vector3(rStart * Math.cos(angle), -1.2, rStart * Math.sin(angle));
+                    
+                    // Melengkung ke dalam lubang
+                    const pC1 = new THREE.Vector3(rMid, 2.5, rMid);
+                    const pC2 = new THREE.Vector3(rMid, -2.5, rMid);
+
+                    const curve = new THREE.CubicBezierCurve3(pStart, pC1, pC2, pEnd);
+                    createPath(curve, 3);
+                }
+
+                // Garis lewat luar pinggiran
+                for(let i=0; i<numOuter; i++) {
+                    const angle = (i/numOuter) * Math.PI * 2;
+                    const rStart = 4.0; // Jari luar torus
+                    const spread = 2 + Math.random() * 4;
+
+                    const pStart = new THREE.Vector3(rStart * Math.cos(angle), 1.0, rStart * Math.sin(angle));
+                    const pEnd = new THREE.Vector3(rStart * Math.cos(angle), -1.0, rStart * Math.sin(angle));
+                    
+                    // Melengkung melebar ke luar
+                    const rControl = rStart + spread;
+                    const pC1 = new THREE.Vector3(rControl * Math.cos(angle), spread, rControl * Math.sin(angle));
+                    const pC2 = new THREE.Vector3(rControl * Math.cos(angle), -spread, rControl * Math.sin(angle));
+
+                    const curve = new THREE.CubicBezierCurve3(pStart, pC1, pC2, pEnd);
+                    createPath(curve, 5);
+                }
+            }
+        }
+
+        function buildFaradaySetup() {
+            // 1. Kumparan (Coil)
+            const coilGroup = new THREE.Group();
+            coilGroup.position.set(0, 0, 0); // Di tengah
+
+            const numLoops = 12;
+            const coilRadius = 3;
+            const tubeRadius = 0.25;
+            const coilLength = 8;
+            
+            // Buat jalur spiral untuk geometri tabung
+            const spiralPoints = [];
+            for (let i = 0; i <= numLoops * 40; i++) {
+                const t = i / (numLoops * 40); // 0 to 1
+                const angle = numLoops * Math.PI * 2 * t;
+                const x = (t - 0.5) * coilLength; // Sumbu X
+                spiralPoints.push(new THREE.Vector3(x, coilRadius * Math.cos(angle), coilRadius * Math.sin(angle)));
+            }
+            const spiralCurve = new THREE.CatmullRomCurve3(spiralPoints);
+            const coilGeo = new THREE.TubeGeometry(spiralCurve, numLoops * 30, tubeRadius, 12, false);
+            const coilMesh = new THREE.Mesh(coilGeo, copperMat);
+            coilMesh.castShadow = true;
+            coilGroup.add(coilMesh);
+            
+            // Partikel elektron mengalir di dalam kabel
+            electronParticles = [];
+            const electronGeo = new THREE.SphereGeometry(0.2, 8, 8);
+            const electronMat = new THREE.MeshBasicMaterial({color: 0x3b82f6}); // Biru terang
+            
+            for(let i=0; i<40; i++) {
+                const dot = new THREE.Mesh(electronGeo, electronMat);
+                coilGroup.add(dot);
+                electronParticles.push({
+                    mesh: dot,
+                    curve: spiralCurve,
+                    progress: i / 40
+                });
+            }
+
+            // 2. Galvanometer (Pengukur Arus)
+            const meterGroup = new THREE.Group();
+            meterGroup.position.set(0, 8, -2); // Di atas kumparan
+
+            const boxGeo = new THREE.BoxGeometry(6, 4, 1);
+            const boxMat = new THREE.MeshStandardMaterial({color: 0x1e293b, roughness: 0.8});
+            const box = new THREE.Mesh(boxGeo, boxMat);
+            
+            const screenGeo = new THREE.PlaneGeometry(5, 3);
+            const screenMat = new THREE.MeshBasicMaterial({color: 0xf8fafc});
+            const screen = new THREE.Mesh(screenGeo, screenMat);
+            screen.position.z = 0.51;
+            
+            // Garis skala ukur (Tengah 0, Kiri -, Kanan +)
+            const scaleGroup = new THREE.Group();
+            for(let i=-2; i<=2; i++) {
+                const h = i === 0 ? 0.8 : 0.4;
+                const line = new THREE.Mesh(new THREE.PlaneGeometry(0.08, h), new THREE.MeshBasicMaterial({color: i===0?0xe62020:0x000}));
+                line.position.set(i*1, 1 - (0.8-h)/2, 0.52);
+                scaleGroup.add(line);
+            }
+            
+            // Jarum Penunjuk
+            const needleGeo = new THREE.CylinderGeometry(0.05, 0.1, 3.2);
+            const needleMat = new THREE.MeshBasicMaterial({color: 0xe62020});
+            galvanometerNeedle = new THREE.Mesh(needleGeo, needleMat);
+            galvanometerNeedle.geometry.translate(0, 1.6, 0); // Pivot di bawah
+            galvanometerNeedle.position.set(0, -1.2, 0.55);
+
+            meterGroup.add(box, screen, scaleGroup, galvanometerNeedle);
+
+            // 3. Kabel Penghubung (Kumparan ke Galvanometer)
+            const wireMat = new THREE.LineBasicMaterial({color: 0x1e293b, linewidth: 3});
+            
+            // Kabel Kiri
+            const w1Pts = [
+                new THREE.Vector3(-coilLength/2, Math.cos(0)*coilRadius, Math.sin(0)*coilRadius), // Ujung awal
+                new THREE.Vector3(-coilLength/2 - 2, -2, 0),
+                new THREE.Vector3(-4, 6, -2),
+                new THREE.Vector3(-2.5, 7, -2) // Masuk meteran
+            ];
+            const wire1 = new THREE.Line(new THREE.BufferGeometry().setFromPoints(w1Pts), wireMat);
+            
+            // Kabel Kanan
+            const w2Pts = [
+                new THREE.Vector3(coilLength/2, Math.cos(0)*coilRadius, Math.sin(0)*coilRadius), // Ujung akhir
+                new THREE.Vector3(coilLength/2 + 2, -2, 0),
+                new THREE.Vector3(4, 6, -2),
+                new THREE.Vector3(2.5, 7, -2) // Masuk meteran
+            ];
+            const wire2 = new THREE.Line(new THREE.BufferGeometry().setFromPoints(w2Pts), wireMat);
+
+            // 4. Lampu Indikator (Glow)
+            const bulbGeo = new THREE.SphereGeometry(1.2, 16, 16);
+            bulbGlow = new THREE.MeshBasicMaterial({color: 0xfacc15, transparent: true, opacity: 0});
+            const bulb = new THREE.Mesh(bulbGeo, bulbGlow);
+            bulb.position.set(0, -6, 0);
+            const bulbBase = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.4, 0.8), new THREE.MeshStandardMaterial({color:0x9ca3af}));
+            bulbBase.position.set(0, -7, 0);
+            
+            faradayGroup.add(coilGroup, meterGroup, wire1, wire2, bulb, bulbBase);
+            faradayGroup.visible = false;
+        }
+
+        function setMode(isFaraday) {
+            isFaradayMode = isFaraday;
+            
+            if (isFaraday) {
+                // --- SETUP FARADAY ---
+                faradayGroup.visible = true;
+                // Tetap tampilkan medan magnet, namun sedikit lebih transparan agar tidak terlalu ramai
+                fieldLinesGroup.children.forEach(c => {
+                    if(c.material && c.material.opacity !== undefined) {
+                        if(c.type === "Line") c.material.opacity = 0.15;
+                    }
+                });
+
+                document.getElementById('faraday-controls').classList.remove('hidden');
+                
+                // Gunakan Magnet Batang sebagai standar percobaan Faraday agar jelas
+                if(currentMagnetType !== 'bar') {
+                    document.getElementById('magnet-shape').value = 'bar';
+                    currentMagnetType = 'bar';
+                    buildMagnet('bar');
+                    updateFieldLines();
+                }
+                
+                // Geser magnet ke kiri (luar kumparan)
+                masterMagnetGroup.position.set(-15, 0, 0);
+                document.getElementById('magnet-position').value = -30;
+                lastMagnetX = -15;
+                isAutoMove = false;
+                document.getElementById('auto-move-toggle').checked = false;
+                
+                // Atur Kamera melihat lurus
+                camera.position.set(0, 10, 45);
+                controls.target.set(0, 0, 0);
+                
+                document.getElementById('instruction-overlay').innerText = "Geser slider atau aktifkan Gerak Otomatis. Perhatikan lampu & jarum pengukur.";
+            } else {
+                // --- SETUP MEDAN MAGNET ---
+                faradayGroup.visible = false;
+                
+                // Kembalikan opacity medan magnet
+                fieldLinesGroup.children.forEach(c => {
+                    if(c.material && c.material.opacity !== undefined) {
+                        if(c.type === "Line") c.material.opacity = 0.25;
+                    }
+                });
+
+                document.getElementById('faraday-controls').classList.add('hidden');
+                
+                // Kembalikan ke tengah
+                masterMagnetGroup.position.set(0, 0, 0);
+                
+                camera.position.set(0, 15, 35);
+                controls.target.set(0, 0, 0);
+                updateFieldLines();
+                
+                document.getElementById('instruction-overlay').innerText = "Putar kamera. Ubah bentuk magnet untuk melihat teori garis gayanya (U ➔ S).";
+            }
+        }
+
+        function setupUIControls() {
+            // Tombol Mode
+            const btnField = document.getElementById('btn-mode-field');
+            const btnFaraday = document.getElementById('btn-mode-faraday');
+
+            btnField.addEventListener('click', () => {
+                btnField.classList.add('active');
+                btnFaraday.classList.remove('active');
+                setMode(false);
+            });
+
+            btnFaraday.addEventListener('click', () => {
+                btnFaraday.classList.add('active');
+                btnField.classList.remove('active');
+                setMode(true);
+            });
+
+            // Pilih Bentuk
+            document.getElementById('magnet-shape').addEventListener('change', (e) => {
+                currentMagnetType = e.target.value;
+                buildMagnet(currentMagnetType);
+                updateFieldLines();
+                // Khusus cincin/tapal kuda, posisinya perlu disesuaikan sedikit saat diputar
+                if(currentMagnetType === 'ring') masterMagnetGroup.position.y = 0;
+                else masterMagnetGroup.position.y = 0;
+            });
+
+            // Slider Kekuatan
+            document.getElementById('magnet-strength').addEventListener('input', (e) => {
+                magnetStrength = parseInt(e.target.value) / 100;
+                document.getElementById('strength-val').innerText = e.target.value + '%';
+                updateFieldLines(); // Regenerasi jumlah garis
+            });
+
+            // Slider Posisi (Manual Faraday)
+            document.getElementById('magnet-position').addEventListener('input', (e) => {
+                if(isFaradayMode && !isAutoMove) {
+                    const newX = parseFloat(e.target.value) / 50 * 20; // Mapping -50..50 ke posisi dunia -20..20
+                    masterMagnetGroup.position.x = newX;
+                }
+            });
+
+            // Toggle Auto-Move
+            document.getElementById('auto-move-toggle').addEventListener('change', (e) => {
+                isAutoMove = e.target.checked;
+                if(isAutoMove) {
+                    // Reset time offset berdasarkan posisi sekarang agar transisi mulus
+                    const currentX = masterMagnetGroup.position.x;
+                    // Cegah NaN dari Math.asin karena masalah presisi floating point
+                    const ratio = Math.max(-1, Math.min(1, currentX / 20));
+                    timeOffset = Math.asin(ratio) || 0; 
+                }
+            });
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            // 1. Animasi Partikel Medan Magnet (mengalir sepanjang kurva)
+            // Hanya jalankan jika garis terlihat
+            if (masterMagnetGroup.visible) {
+                fieldParticles.forEach(p => {
+                    p.progress += p.speed;
+                    // Pastikan progress selalu dalam rentang 0 hingga 1 menggunakan modulo
+                    p.progress = p.progress % 1;
+                    if (p.progress < 0) p.progress += 1;
+                    
+                    const pos = p.curve.getPointAt(p.progress);
+                    p.mesh.position.copy(pos);
+                    
+                    // Rotasi panah searah garis singgung kurva
+                    const tangent = p.curve.getTangentAt(p.progress);
+                    const target = pos.clone().add(tangent);
+                    p.mesh.lookAt(target);
+                });
+            }
+
+            // 2. Logika Induksi Faraday
+            if (isFaradayMode) {
+                // Gerak Otomatis
+                if (isAutoMove) {
+                    timeOffset += 0.02; // Kecepatan osilasi
+                    const targetX = Math.sin(timeOffset) * 20;
+                    masterMagnetGroup.position.x = targetX;
+                    
+                    // Update slider UI agar sinkron
+                    document.getElementById('magnet-position').value = (targetX / 20) * 50;
+                }
+
+                const currentX = masterMagnetGroup.position.x;
+                const coilCenter = 0; // Kumparan ada di x=0
+                
+                // Hukum Faraday: EMF (GGL Induksi) = - N (dΦ/dt)
+                // Kecepatan (dx/dt)
+                const velocity = currentX - lastMagnetX;
+                
+                // Fluks (Φ) paling kuat di tengah kumparan, mengikuti kurva Gaussian
+                const distance = Math.abs(currentX - coilCenter);
+                // Kekuatan fluks dalam kumparan berdasarkan jarak
+                const fluxStrength = Math.exp(-(distance * distance) / 15) * magnetStrength;
+                
+                // Turunan ruang dari fluks (Gradient)
+                // Jika magnet mendekat, dFlux positif. Jika menjauh, negatif.
+                // Arah kutub juga menentukan (N atau S). Magnet batang N di -x, S di +x.
+                const gradient = (currentX < 0) ? fluxStrength : -fluxStrength; 
+                
+                // Raw EMF proporsional dengan (Kecepatan * Gradien Fluks)
+                let rawEMF = velocity * gradient * 150; 
+                
+                // Smoothing gerak jarum (Inersia)
+                inducedEMF += (rawEMF - inducedEMF) * 0.15;
+                
+                // --- Efek Visual berdasarkan EMF ---
+                
+                // A. Ayunan Jarum Galvanometer (Batas Max -60..60 derajat)
+                const maxAngle = Math.PI / 3;
+                let targetAngle = inducedEMF * 0.3;
+                targetAngle = Math.max(-maxAngle, Math.min(maxAngle, targetAngle));
+                galvanometerNeedle.rotation.z = -targetAngle;
+                
+                // B. Lampu Menyala
+                bulbGlow.opacity = Math.min(1.0, Math.abs(inducedEMF) * 0.4);
+                
+                // C. Aliran Elektron di Kabel
+                // Kecepatan elektron tergantung EMF
+                const electronSpeed = inducedEMF * 0.05;
+                
+                if (Math.abs(electronSpeed) > 0.005) {
+                    electronParticles.forEach(p => {
+                        p.mesh.visible = true;
+                        p.progress += electronSpeed;
+                        // Looping progress 0..1 dengan aman walaupun lompatan angkanya besar
+                        p.progress = p.progress % 1;
+                        if (p.progress < 0) p.progress += 1;
+                        
+                        const pos = p.curve.getPointAt(p.progress);
+                        p.mesh.position.copy(pos);
+                    });
+                } else {
+                    // Sembunyikan elektron jika arus sangat kecil/nol
+                    electronParticles.forEach(p => p.mesh.visible = false);
+                }
+
+                lastMagnetX = currentX;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Mulai aplikasi saat window dimuat
+        window.onload = init;
+
+    </script>
+</body>
+</html>
