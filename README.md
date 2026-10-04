@@ -1,1 +1,0 @@
-Simulasi-Induksi-Elektromagnetik
